@@ -1,56 +1,105 @@
 package net.sasakiy85.handymemo.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import android.content.Intent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayCircleOutline
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import net.sasakiy85.handymemo.data.Memo
 import java.time.format.DateTimeFormatter
 
 @Composable
 fun MemoCard(memo: Memo) {
+    val context = LocalContext.current
+    val formatter = remember { DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm") }
+
     Card(modifier = Modifier.padding(8.dp).fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                if (memo.tags.isNotEmpty()) {
-                    Text(
-                        text = memo.tags.joinToString(", "),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = memo.time.format(formatter),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
-                if (memo.tags.isEmpty()) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
-
-                val formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm")
-                // 2. ZonedDateTime オブジェクトの format メソッドで書式を適用
-                val formattedTime = memo.time.format(formatter)
-
-                Text(
-                    text = formattedTime,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
-                )
+            if (memo.bodyText.isNotEmpty()) {
+                Text(text = memo.bodyText)
             }
 
-            Text(
-                modifier = Modifier.padding(top = 8.dp),
-                text = memo.content,
-                style = MaterialTheme.typography.bodyLarge
-            )
+            if (memo.attachments.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                memo.attachments.forEach { attachment ->
+                    if (attachment.isVideo) {
+                        // --- 動画の場合 ---
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16 / 9f)
+                                .clip(MaterialTheme.shapes.medium) // 角を丸める
+                                .clickable {
+                                    // タップで外部プレーヤーを起動
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(attachment.uri, "video/*")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(intent)
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // 背景にサムネイル画像を表示
+                            AsyncImage(
+                                model = attachment.thumbnailUri,
+                                contentDescription = "Video Thumbnail",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            // 中央に再生アイコンを重ねて表示
+                            Icon(
+                                imageVector = Icons.Default.PlayCircleOutline,
+                                contentDescription = "Play Video",
+                                modifier = Modifier.size(64.dp),
+                                tint = Color.White.copy(alpha = 0.8f) // 少し透明にする
+                            )
+                        }
+                    } else {
+                        // --- 画像の場合 ---
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16 / 9f)
+                                .clip(MaterialTheme.shapes.medium)
+                                .clickable {
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        // MIMEタイプを "image/*" に設定
+                                        setDataAndType(attachment.uri, "image/*")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(intent)
+                                }
+                        ) {
+                            AsyncImage(
+                                model = attachment.uri,
+                                contentDescription = "Attached Image",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

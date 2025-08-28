@@ -12,9 +12,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.SubdirectoryArrowLeft
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -27,27 +27,24 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MemoEditScreen(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
     onSave: (content: String) -> Unit,
     onSaveAndClose: (content: String) -> Unit,
     onToList: () -> Unit,
     onClear: () -> Unit,
-    initialText: String?,
+    onAddImages: () -> Unit,
 ) {
-    var text by remember {
-        mutableStateOf(initialText ?: "")
-    }
     val focusRequester = remember { FocusRequester() }
 
     Scaffold(
@@ -61,7 +58,14 @@ fun MemoEditScreen(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     FloatingActionButton(
-                        onClick = { onSave(text) },
+                        onClick = onToList,
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Cancel")
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    FloatingActionButton(
+                        onClick = { onSave(value.text) },
                         containerColor = MaterialTheme.colorScheme.secondaryContainer
                     ) {
                         Icon(Icons.Default.SubdirectoryArrowLeft, contentDescription = "Save")
@@ -72,15 +76,13 @@ fun MemoEditScreen(
                     horizontalArrangement = Arrangement.End
                 ) {
                     FloatingActionButton(
-                        onClick = onToList,
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        onClick = onAddImages
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Cancel")
+                        Icon(Icons.Default.AddPhotoAlternate, contentDescription = "Insert Images")
                     }
                     Spacer(Modifier.width(16.dp))
                     FloatingActionButton(
                         onClick = {
-                            text = ""
                             onClear()
                         },
                         containerColor = MaterialTheme.colorScheme.secondaryContainer
@@ -88,7 +90,7 @@ fun MemoEditScreen(
                         Icon(Icons.Default.Autorenew, contentDescription = "Clear")
                     }
                     Spacer(Modifier.width(16.dp))
-                    FloatingActionButton(onClick = { onSaveAndClose(text) }) {
+                    FloatingActionButton(onClick = { onSaveAndClose(value.text) }) {
                         Icon(Icons.Default.Done, contentDescription = "Save and Close")
                     }
                 }
@@ -106,7 +108,7 @@ fun MemoEditScreen(
                 },
                 actions = {
                     IconButton(onClick = {
-                        onSave(text)
+                        onSave(value.text)
                     }) {
                         Icon(Icons.Default.Done, contentDescription = "Save")
                     }
@@ -117,8 +119,8 @@ fun MemoEditScreen(
         paddingValues ->
         Column(modifier = Modifier.padding(paddingValues)) {
             OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
+                value = value,
+                onValueChange = onValueChange,
                 modifier = Modifier.imePadding().fillMaxSize().focusRequester(focusRequester),
                 label = {
                     Text("Content")

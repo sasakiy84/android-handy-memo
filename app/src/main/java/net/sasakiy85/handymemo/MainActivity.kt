@@ -5,9 +5,12 @@ import android.app.ComponentCaller
 import android.content.Intent
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,9 +20,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.NavType
@@ -40,6 +48,14 @@ import java.net.URLEncoder
 class MainActivity : ComponentActivity() {
 
     private lateinit var memoViewModel: MemoViewModel
+    private val pickMultiplePhotoLauncher = registerForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            Log.d("PhotoPicker", "Selected URIs: $uris")
+            memoViewModel.attachImages(uris)
+        }
+    }
     private val openDirectoryLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -72,7 +88,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             HandyMemoTheme {
-                val activity = LocalContext.current as? Activity
+                val activity = LocalActivity.current
                 val rootUri by memoViewModel.rootUri.collectAsState()
                 val initialUri = DocumentsContract.buildDocumentUri(
                     "com.android.externalstorage.documents",
@@ -93,8 +109,14 @@ class MainActivity : ComponentActivity() {
                     NavHost(navController = navController, startDestination = "memoEdit?template=${URLEncoder.encode(lastUsedTemplate, "UTF-8")}") {
                         composable("memoList") {
                             val memos by memoViewModel.memos.collectAsState()
+                            val searchQuery by memoViewModel.searchQuery.collectAsState()
                             MemoList(
-                                memos, onAddMemo = {
+                                memos,
+                                searchQuery = searchQuery, // Pass the query
+                                onSearchQueryChange = { query ->
+                                    memoViewModel.onSearchQueryChange(query) // Update the query
+                                },
+                                onAddMemo = {
                                     val encodedTemplate = URLEncoder.encode(lastUsedTemplate, "UTF-8")
                                     navController.navigate("memoEdit?template=$encodedTemplate")
                                 },
@@ -110,7 +132,25 @@ class MainActivity : ComponentActivity() {
                             })) { backStackEntry ->
                             val encodedTemplate = backStackEntry.arguments?.getString("templateText") ?: ""
                             val template = URLDecoder.decode(encodedTemplate, "UTF-8")
+                            var textFieldValue by remember { mutableStateOf(TextFieldValue(template)) }
+
+                            LaunchedEffect(Unit) {
+                                memoViewModel.insertTextEvent.collect { textToInsert ->
+                                    val currentText = textFieldValue.text
+                                    val cursorPosition = textFieldValue.selection.start
+                                    val newText = currentText.replaceRange(cursorPosition, cursorPosition, textToInsert)
+                                    val newCursorPosition = cursorPosition + textToInsert.length
+
+                                    textFieldValue = TextFieldValue(
+                                        text = newText,
+                                        selection = TextRange(newCursorPosition)
+                                    )
+                                }
+                            }
+
                             MemoEditScreen(
+                                value = textFieldValue,
+                                onValueChange = { textFieldValue = it },
                                 onSave = { content ->
                                     memoViewModel.createMemo(content)
                                     navController.popBackStack()
@@ -119,9 +159,16 @@ class MainActivity : ComponentActivity() {
                                     memoViewModel.createMemo(content)
                                     activity?.finish()
                                 },
+                                onAddImages = {
+                                    pickMultiplePhotoLauncher.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                                    )
+                                },
                                 onToList = { navController.navigate("memoList") },
-                                onClear = { memoViewModel.clearLastUsedTemplate() },
-                                initialText = template
+                                onClear = {
+                                    textFieldValue = TextFieldValue("")
+                                    memoViewModel.clearLastUsedTemplate()
+                                },
                             )
                         }
                         composable("settings") {
