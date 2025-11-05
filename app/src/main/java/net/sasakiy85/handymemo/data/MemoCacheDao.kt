@@ -20,6 +20,19 @@ interface MemoCacheDao {
     @Query("SELECT filePath, displayName, memoCreatedAt FROM memo_cache ORDER BY memoCreatedAt DESC")
     fun getPagedMemoListItems(): PagingSource<Int, MemoListItem>
 
+    // 月ごとのフィルタリング用PagingSource
+    @Query("""
+        SELECT filePath, displayName, memoCreatedAt 
+        FROM memo_cache 
+        WHERE memoCreatedAt >= :startTimestamp 
+          AND memoCreatedAt < :endTimestamp
+        ORDER BY memoCreatedAt DESC
+    """)
+    fun getPagedMemoListItemsByMonth(
+        startTimestamp: Long,
+        endTimestamp: Long
+    ): PagingSource<Int, MemoListItem>
+
     // 検索用の Paging 3 クエリ（軽量投影、空白区切りでAND検索）
     @RawQuery(observedEntities = [MemoCache::class])
     fun getPagedSearchMemoListItems(query: SupportSQLiteQuery): PagingSource<Int, MemoListItem>
@@ -51,5 +64,9 @@ interface MemoCacheDao {
         ORDER BY memoCreatedAt DESC
     """)
     fun searchMemoListItems(query: String): List<MemoListItem>
+
+    // 最も古いメモの日付を取得（ミリ秒のタイムスタンプ）
+    @Query("SELECT MIN(memoCreatedAt) FROM memo_cache")
+    suspend fun getOldestMemoDate(): Long?
 }
 

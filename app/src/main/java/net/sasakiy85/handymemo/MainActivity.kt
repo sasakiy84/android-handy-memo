@@ -112,6 +112,7 @@ class MainActivity : ComponentActivity() {
                     NavHost(navController = navController, startDestination = "memoEdit?template=${URLEncoder.encode(lastUsedTemplate, "UTF-8")}") {
                         composable("memoList") {
                             val searchQuery by memoViewModel.searchQuery.collectAsState()
+                            val currentDisplayMonth by memoViewModel.currentDisplayMonth.collectAsState()
                             MemoList(
                                 memoListItems = memoViewModel.memoListItems,
                                 searchQuery = searchQuery,
@@ -131,6 +132,13 @@ class MainActivity : ComponentActivity() {
                                 },
                                 getMemoDetail = { memoListItem ->
                                     memoViewModel.getMemoDetail(memoListItem)
+                                },
+                                currentDisplayMonth = currentDisplayMonth,
+                                onMoveToNextMonth = {
+                                    memoViewModel.moveToNextMonth()
+                                },
+                                onMoveToPreviousMonth = {
+                                    memoViewModel.moveToPreviousMonth()
                                 }
                             )
                         }

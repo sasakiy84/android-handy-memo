@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import net.sasakiy85.handymemo.data.MediaAttachment
+import net.sasakiy85.handymemo.data.YearMonth
 import net.sasakiy85.handymemo.work.MemoIndexerWorker
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -60,12 +61,22 @@ class MemoViewModel(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
     
+    // 現在表示中の年月
+    private val _currentDisplayMonth = MutableStateFlow<YearMonth>(
+        YearMonth.fromCurrent(ZoneId.systemDefault())
+    )
+    val currentDisplayMonth: StateFlow<YearMonth> = _currentDisplayMonth
+    
     // 検索クエリ（デバウンス付き）
     private val debouncedSearchQuery = _searchQuery
         .debounce(300) // 300ms待機
     
-    // Paging 3 を使用したメモ一覧（検索クエリに応じて切り替え）
-    val memoListItems: Flow<PagingData<MemoListItem>> = combine(_refreshTrigger, debouncedSearchQuery) { _, query ->
+    // Paging 3 を使用したメモ一覧（検索クエリと月に応じて切り替え）
+    val memoListItems: Flow<PagingData<MemoListItem>> = combine(
+        _refreshTrigger,
+        debouncedSearchQuery,
+        _currentDisplayMonth
+    ) { _, query, month ->
         Pager(
             config = PagingConfig(
                 pageSize = 20,
@@ -74,9 +85,13 @@ class MemoViewModel(
             )
         ) {
             if (query.isBlank()) {
-                dao.getPagedMemoListItems()
+                // 検索クエリが空の場合は月フィルタを適用
+                val zoneId = ZoneId.systemDefault()
+                val startTimestamp = month.getStartTimestamp(zoneId)
+                val endTimestamp = month.getEndTimestamp(zoneId)
+                dao.getPagedMemoListItemsByMonth(startTimestamp, endTimestamp)
             } else {
-                // 空白区切りでAND検索
+                // 検索クエリがある場合は全件表示（月フィルタなし）
                 val searchQuery = net.sasakiy85.handymemo.data.MemoSearchHelper.buildSearchQuery(query)
                 dao.getPagedSearchMemoListItems(searchQuery)
             }
@@ -197,6 +212,46 @@ class MemoViewModel(
 
     fun onSearchQueryChange(query: String) {
         _searchQuery.value = query
+        // 検索をクリアした場合は現在の月にリセットしない（最後に表示していた月を維持）
+    }
+
+    // 翌月に移動（未来の月には移動しない）
+    fun moveToNextMonth() {
+        val nextMonth = _currentDisplayMonth.value.toNextMonth()
+        val currentMonth = YearMonth.fromCurrent(ZoneId.systemDefault())
+        // 未来の月になる場合は移動しない
+        if (!nextMonth.isAfter(currentMonth)) {
+            _currentDisplayMonth.value = nextMonth
+        }
+    }
+
+    // 先月に移動（最も古いメモより以前の月には移動しない）
+    fun moveToPreviousMonth() {
+        viewModelScope.launch {
+            val previousMonth = _currentDisplayMonth.value.toPreviousMonth()
+            val zoneId = ZoneId.systemDefault()
+            
+            // DBから最も古いメモの日付を取得
+            val oldestMemoDate = withContext(Dispatchers.IO) {
+                dao.getOldestMemoDate()
+            }
+            
+            if (oldestMemoDate != null) {
+                // 最も古いメモの月を取得
+                val oldestMemoMonth = YearMonth.fromTimestamp(oldestMemoDate, zoneId)
+                // 先月が最も古いメモの月より後か同じ場合のみ移動
+                if (!previousMonth.isBefore(oldestMemoMonth)) {
+                    _currentDisplayMonth.value = previousMonth
+                }
+            } else {
+                // メモが存在しない場合は移動しない
+            }
+        }
+    }
+
+    // 現在の月にリセット
+    fun resetToCurrentMonth() {
+        _currentDisplayMonth.value = YearMonth.fromCurrent(ZoneId.systemDefault())
     }
 
     fun createMemo(content: String) {
