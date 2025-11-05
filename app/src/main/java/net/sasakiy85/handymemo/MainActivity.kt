@@ -190,6 +190,7 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("settings") {
                             val indexingStatus by memoViewModel.indexingStatus.collectAsState()
+                            val shareIntentTemplate by memoViewModel.shareIntentTemplate.collectAsState()
                             SettingsScreen(
                                 currentFolderUri = rootUri,
                                 onSelectFolder = {
@@ -202,7 +203,11 @@ class MainActivity : ComponentActivity() {
                                 onReloadIndex = {
                                     memoViewModel.triggerManualIndexing()
                                 },
-                                indexingStatus = indexingStatus
+                                indexingStatus = indexingStatus,
+                                shareIntentTemplate = shareIntentTemplate,
+                                onShareIntentTemplateChange = { template ->
+                                    memoViewModel.saveShareIntentTemplate(template)
+                                }
                             )
                         }
                     }
@@ -293,7 +298,7 @@ class MainActivity : ComponentActivity() {
                     
                     Log.d("ShareIntent", "Final combined text: $combinedText")
                     if (combinedText.isNotBlank()) {
-                        memoViewModel.onWidgetTapped(combinedText)
+                        memoViewModel.onShareIntentReceived(combinedText)
                     }
                 }
             }

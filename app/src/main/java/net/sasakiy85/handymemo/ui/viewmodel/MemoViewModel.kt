@@ -110,6 +110,12 @@ class MemoViewModel(
         initialValue = ""
     )
 
+    val shareIntentTemplate: StateFlow<String> = settingsRepository.shareIntentTemplateFlow.stateIn(
+        viewModelScope,
+        started = SharingStarted.Lazily,
+        initialValue = ""
+    )
+
     private val _navigateToEditScreen = MutableStateFlow<String?>(null)
     val navigateToEditScreen: StateFlow<String?> = _navigateToEditScreen
 
@@ -321,11 +327,34 @@ class MemoViewModel(
         }
     }
 
+    fun saveShareIntentTemplate(templateText: String) {
+        viewModelScope.launch {
+            settingsRepository.saveShareIntentTemplate(templateText)
+        }
+    }
+
     fun onWidgetTapped(templateText: String?) {
         viewModelScope.launch {
             settingsRepository.saveLastUsedTemplate(templateText ?: "")
         }
         _navigateToEditScreen.value = templateText
+    }
+
+    fun onShareIntentReceived(sharedContent: String) {
+        viewModelScope.launch {
+            // 共有Intent用テンプレートを取得
+            val template = settingsRepository.shareIntentTemplateFlow.first()
+            
+            // 共有内容を最初に挿入し、その後にテンプレートを追加
+            val finalText = if (template.isNotBlank()) {
+                sharedContent + template
+            } else {
+                sharedContent
+            }
+            
+            settingsRepository.saveLastUsedTemplate(finalText)
+            _navigateToEditScreen.value = finalText
+        }
     }
 
     fun onNavigationCompleted() {

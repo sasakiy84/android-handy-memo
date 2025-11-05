@@ -31,4 +31,14 @@ class SettingsRepository(private val context: Context) {
             preferences[lastUsedTemplateKey] = templateText
         }
     }
+
+    private val shareIntentTemplateKey = stringPreferencesKey("share_intent_template")
+    val shareIntentTemplateFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[shareIntentTemplateKey] ?: ""
+    }
+    suspend fun saveShareIntentTemplate(templateText: String) {
+        context.dataStore.edit { preferences ->
+            preferences[shareIntentTemplateKey] = templateText
+        }
+    }
 }

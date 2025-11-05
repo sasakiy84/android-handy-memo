@@ -28,7 +28,9 @@ fun SettingsScreen(
     onSelectFolder: () -> Unit,
     onBack: () -> Unit,
     onReloadIndex: () -> Unit,
-    indexingStatus: MemoViewModel.IndexingStatus
+    indexingStatus: MemoViewModel.IndexingStatus,
+    shareIntentTemplate: String,
+    onShareIntentTemplateChange: (String) -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -58,6 +60,28 @@ fun SettingsScreen(
             ) {
                 Text("Change Folder")
             }
+
+            Spacer(modifier = Modifier.padding(8.dp))
+
+            Text(
+                text = "Share Intent Template",
+                style = MaterialTheme.typography.titleMedium
+            )
+
+            Text(
+                text = "テンプレートを設定すると、共有Intentから来た内容がテンプレートの最初に挿入されます。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            OutlinedTextField(
+                value = shareIntentTemplate,
+                onValueChange = onShareIntentTemplateChange,
+                label = { Text("Share Intent Template") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+                maxLines = 10
+            )
 
             Spacer(modifier = Modifier.padding(8.dp))
 
