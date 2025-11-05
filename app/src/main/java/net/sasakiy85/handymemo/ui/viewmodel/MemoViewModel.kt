@@ -8,7 +8,12 @@ import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,7 +21,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import net.sasakiy85.handymemo.data.AppDatabase
 import net.sasakiy85.handymemo.data.Memo
+import net.sasakiy85.handymemo.data.MemoCache
+import net.sasakiy85.handymemo.data.MemoListItem
 import net.sasakiy85.handymemo.data.SettingsRepository
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -24,145 +32,107 @@ import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import net.sasakiy85.handymemo.data.MediaAttachment
 import java.io.File
 
-class MemoViewModel(private val application: Application,
+class MemoViewModel(
+    private val application: Application,
     private val settingsRepository: SettingsRepository
-    ): ViewModel() {
+) : ViewModel() {
 
-    private val _allMemos = MutableStateFlow<List<Memo>>(emptyList())
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery
-    @OptIn(FlowPreview::class)
-    val memos: StateFlow<List<Memo>> = _searchQuery.debounce(300L)
-        .combine(_allMemos) { query, allMemos ->
-            if (query.isBlank()) {
-                allMemos
-            } else {
-                withContext(Dispatchers.Default) {
-                    try {
-                        val regex = query.toRegex(RegexOption.IGNORE_CASE)
-                        allMemos.filter { memo ->
-                            regex.containsMatchIn(memo.bodyText)
-                        }
-                    } catch (e: Exception) {
-                        emptyList()
-                    }
-                }
-            }
-        }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    private val database = AppDatabase.getDatabase(application)
+    private val dao = database.memoCacheDao()
+
+    // Paging 3 を使用したメモ一覧
+    val memoListItems: Flow<PagingData<MemoListItem>> = Pager(
+        config = PagingConfig(
+            pageSize = 20,
+            enablePlaceholders = false,
+            prefetchDistance = 5
+        )
+    ) {
+        dao.getPagedMemoListItems()
+    }.flow.cachedIn(viewModelScope)
+
     val rootUri: StateFlow<Uri?> = settingsRepository.rootUriFlow
         .map { uriString -> uriString?.toUri() }
         .stateIn(viewModelScope, SharingStarted.Lazily, null)
-    val lastUsedTemplate: StateFlow<String> = settingsRepository.lastUsedTemplateFlow.stateIn(viewModelScope, started = SharingStarted.Lazily, initialValue = "")
+
+    val lastUsedTemplate: StateFlow<String> = settingsRepository.lastUsedTemplateFlow.stateIn(
+        viewModelScope,
+        started = SharingStarted.Lazily,
+        initialValue = ""
+    )
 
     private val _navigateToEditScreen = MutableStateFlow<String?>(null)
     val navigateToEditScreen: StateFlow<String?> = _navigateToEditScreen
 
-    init {
-        viewModelScope.launch {
-            rootUri.collect { uri ->
-                if (uri != null) {
-                    loadMemos()
-                } else {
-                    Log.d("MemoApp", "rootUri is not set")
-                }
-            }
-        }
-    }
-
-    fun saveRootUri(uri: Uri) {
-        viewModelScope.launch {
-            settingsRepository.saveRootUri(uri.toString())
-        }
-    }
-
-    private fun loadMemos() {
-        val currentRootUri = rootUri.value ?: return
-        viewModelScope.launch {
-            val loadedMemos = withContext(Dispatchers.IO) {
-                val rootDir = DocumentFile.fromTreeUri(application, currentRootUri) ?: return@withContext emptyList<Memo>()
-                val memosDir = rootDir.findFile("memos") ?: return@withContext emptyList<Memo>()
-
-                Log.d("MemoApp", "Try to walking directory: ${memosDir.uri}")
-                if (!memosDir.exists()) {
-                    Log.e("MemoApp", "Memos directory not found: ${memosDir.uri}")
-                    return@withContext emptyList<Memo>()
-                }
-
-                val memoList = mutableListOf<Memo>()
-                fun findMemosRecursive(directory: DocumentFile) {
-                    directory.listFiles().forEach { file ->
-                        if (file.isDirectory) {
-                            findMemosRecursive(file)
-                        } else if (file.isFile && file.name?.endsWith(".md") == true) {
-                            parseMemoFile(file, rootDir)?.let { memo ->
-                                memoList.add(memo)
-                            }
-                        }
-                    }
-                }
-
-                findMemosRecursive(memosDir)
-                memoList.sortedByDescending { it.time }
-            }
-            _allMemos.value = loadedMemos
-        }
-
-    }
+    private val _insertTextEvent = MutableSharedFlow<String>()
+    val insertTextEvent = _insertTextEvent.asSharedFlow()
 
     private val fileNameFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
 
-    private fun parseMemoFile(file: DocumentFile, rootDir: DocumentFile): Memo? {
-        val fileName = file.name ?: return null
+    // 詳細表示用：MemoListItem から Memo を構築（DB から fullText と attachments を取得）
+    suspend fun getMemoDetail(memoListItem: MemoListItem): Memo? = withContext(Dispatchers.IO) {
         try {
-            val id = fileName.removeSuffix(".md")
-            val localDateTime = LocalDateTime.parse(id, fileNameFormatter)
-            val time = ZonedDateTime.of(localDateTime, ZoneId.systemDefault())
+            val memoCache = dao.getMemoByFilePath(memoListItem.filePath)
+                ?: return@withContext null
 
-            val bodyWithLinks = application.contentResolver.openInputStream(file.uri)
-                ?.bufferedReader()?.use { it.readText() } ?: return null
+            val rootUriString = settingsRepository.rootUriFlow.first()
+            val rootUri = rootUriString?.toUri() ?: return@withContext null
+            val rootDir = DocumentFile.fromTreeUri(application, rootUri)
+                ?: return@withContext null
 
-
+            // fullTextから attachments を取得
             val markdownLinkRegex = "!\\[(.*?)]\\((.*?)\\)".toRegex()
-            val attachments = markdownLinkRegex.findAll(bodyWithLinks).mapNotNull { matchResult ->
+            val attachments = markdownLinkRegex.findAll(memoCache.fullText).mapNotNull { matchResult ->
                 val relativePath = matchResult.groupValues[2]
-                // ルートから相対パスをたどってメディアファイルを見つける
                 findMediaFile(rootDir, relativePath)?.let { mediaFile ->
                     val mimeType = mediaFile.type
                     val isVideo = mimeType?.startsWith("video/") == true
                     var thumbnailUri: Uri? = null
 
                     if (isVideo) {
-                        // Generate and cache the thumbnail for videos
                         thumbnailUri = generateAndCacheThumbnail(mediaFile.uri)
                     }
                     MediaAttachment(mediaFile.uri, isVideo, thumbnailUri)
                 }
             }.toList()
 
-            val cleanBodyText = bodyWithLinks.replace(markdownLinkRegex, "[Media Inserted]").trim()
+            val cleanBodyText = memoCache.fullText.replace(markdownLinkRegex, "[Media Inserted]").trim()
 
-            return Memo(id, time, tags = emptyList(), cleanBodyText, attachments)
+            val localDateTime = LocalDateTime.parse(memoListItem.displayName, fileNameFormatter)
+            val time = ZonedDateTime.of(localDateTime, ZoneId.systemDefault())
+
+            Memo(
+                id = memoListItem.displayName,
+                time = time,
+                tags = emptyList(),
+                bodyText = cleanBodyText,
+                attachments = attachments
+            )
         } catch (e: Exception) {
-            Log.e("MemoApp", "Failed to parse file: $fileName", e)
-            return null
+            Log.e("MemoViewModel", "Failed to get memo detail: ${memoListItem.filePath}", e)
+            null
         }
     }
+
     private fun findMediaFile(rootDir: DocumentFile, relativePath: String): DocumentFile? {
-        // "../" を無視し、意味のあるパス部分だけを抽出
         val pathSegments = relativePath.split('/').filter { it.isNotBlank() && it != ".." }
         var currentFile = rootDir
         pathSegments.forEach { segment ->
             currentFile = currentFile.findFile(segment) ?: return null
         }
         return if (currentFile.uri != rootDir.uri && currentFile.isFile) currentFile else null
+    }
+
+    fun saveRootUri(uri: Uri) {
+        viewModelScope.launch {
+            settingsRepository.saveRootUri(uri.toString())
+        }
     }
 
     fun createMemo(content: String) {
@@ -176,9 +146,6 @@ class MemoViewModel(private val application: Application,
             val id = now.format(fileNameFormatter)
             val year = now.year.toString()
             val month = "%02d".format(now.monthValue)
-            val fileContent = """
-                $content
-            """.trimIndent()
 
             val rootDir = DocumentFile.fromTreeUri(application, currentRootUri)
             if (rootDir == null) {
@@ -204,16 +171,29 @@ class MemoViewModel(private val application: Application,
                         return@withContext
                     }
 
+                    // ファイルに書き込み
                     application.contentResolver.openOutputStream(newFile.uri)?.bufferedWriter()?.use { writer ->
                         writer.write(content)
                     }
+
+                    // DBにも挿入
+                    val filePath = newFile.uri.toString()
+                    val memoCreatedAt = now.toInstant().toEpochMilli()
+                    val memoCache = MemoCache(
+                        filePath = filePath,
+                        displayName = id,
+                        memoCreatedAt = memoCreatedAt,
+                        fullText = content
+                    )
+                    dao.insertAll(listOf(memoCache))
+                    
+                    Log.d("MemoApp", "Successfully created memo and inserted into DB: $filePath")
                 } catch (e: Exception) {
                     Log.e("MemoApp", "Failed to create memo file", e)
                     return@withContext
                 }
             }
         }
-        loadMemos()
     }
 
     fun clearLastUsedTemplate() {
@@ -233,9 +213,6 @@ class MemoViewModel(private val application: Application,
         _navigateToEditScreen.value = null
     }
 
-
-    private val _insertTextEvent = MutableSharedFlow<String>()
-    val insertTextEvent = _insertTextEvent.asSharedFlow()
     fun attachImages(uris: List<Uri>) {
         val currentRootUri = rootUri.value ?: run {
             Log.e("MemoApp", "Tried to attach images, but rootUri is not set")
@@ -309,7 +286,6 @@ class MemoViewModel(private val application: Application,
 
     private fun generateAndCacheThumbnail(videoUri: Uri): Uri? {
         val context = application.applicationContext
-        // Create a unique name for the cache file based on the original URI
         val cacheFileName = "thumb_${videoUri.toString().hashCode()}.jpg"
         val cacheDir = File(context.cacheDir, "thumbnails")
         if (!cacheDir.exists()) {
@@ -317,24 +293,19 @@ class MemoViewModel(private val application: Application,
         }
         val thumbnailFile = File(cacheDir, cacheFileName)
 
-        // If the thumbnail already exists in the cache, return its URI
         if (thumbnailFile.exists()) {
             return Uri.fromFile(thumbnailFile)
         }
 
-        // If not cached, extract the thumbnail
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, videoUri)
-            // Get a frame at the 1-second mark
             val bitmap = retriever.getFrameAtTime(1_000_000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
 
             if (bitmap != null) {
-                // Save the bitmap to the cache file
                 thumbnailFile.outputStream().use { out ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
                 }
-                // Return the URI of the newly created cache file
                 return Uri.fromFile(thumbnailFile)
             }
         } catch (e: Exception) {
@@ -343,10 +314,5 @@ class MemoViewModel(private val application: Application,
             retriever.release()
         }
         return null
-    }
-
-
-    fun onSearchQueryChange(query: String) {
-        _searchQuery.value = query
     }
 }

@@ -84,6 +84,9 @@ class MainActivity : ComponentActivity() {
         }
         memoViewModel = ViewModelProvider(this, factory)[MemoViewModel::class.java]
 
+        // WorkManager の初期化（OneTime + Periodic）
+        net.sasakiy85.handymemo.work.WorkManagerInitializer.initializeWorkManager(applicationContext)
+
         handleIntent(intent)
         enableEdgeToEdge()
         setContent {
@@ -108,13 +111,12 @@ class MainActivity : ComponentActivity() {
                     val navController = rememberNavController()
                     NavHost(navController = navController, startDestination = "memoEdit?template=${URLEncoder.encode(lastUsedTemplate, "UTF-8")}") {
                         composable("memoList") {
-                            val memos by memoViewModel.memos.collectAsState()
-                            val searchQuery by memoViewModel.searchQuery.collectAsState()
+                            val searchQuery by remember { mutableStateOf("") }
                             MemoList(
-                                memos,
-                                searchQuery = searchQuery, // Pass the query
+                                memoListItems = memoViewModel.memoListItems,
+                                searchQuery = searchQuery,
                                 onSearchQueryChange = { query ->
-                                    memoViewModel.onSearchQueryChange(query) // Update the query
+                                    // TODO: 検索機能の実装（後で追加）
                                 },
                                 onAddMemo = {
                                     val encodedTemplate = URLEncoder.encode(lastUsedTemplate, "UTF-8")
@@ -122,6 +124,13 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onSettingsClick = {
                                     navController.navigate("settings")
+                                },
+                                onMemoClick = { memoListItem ->
+                                    // TODO: 詳細画面への遷移（後で追加）
+                                    // 現在は一覧のみ表示
+                                },
+                                getMemoDetail = { memoListItem ->
+                                    memoViewModel.getMemoDetail(memoListItem)
                                 }
                             )
                         }
