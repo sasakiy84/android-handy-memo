@@ -5,7 +5,9 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.RawQuery
 import androidx.room.Transaction
+import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -17,6 +19,10 @@ interface MemoCacheDao {
     // Paging 3 用のクエリ（軽量投影）
     @Query("SELECT filePath, displayName, memoCreatedAt FROM memo_cache ORDER BY memoCreatedAt DESC")
     fun getPagedMemoListItems(): PagingSource<Int, MemoListItem>
+
+    // 検索用の Paging 3 クエリ（軽量投影、空白区切りでAND検索）
+    @RawQuery(observedEntities = [MemoCache::class])
+    fun getPagedSearchMemoListItems(query: SupportSQLiteQuery): PagingSource<Int, MemoListItem>
 
     // 詳細用の全文取得
     @Query("SELECT * FROM memo_cache WHERE filePath = :filePath")

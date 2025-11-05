@@ -37,6 +37,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import net.sasakiy85.handymemo.data.MediaAttachment
 import net.sasakiy85.handymemo.work.MemoIndexerWorker
 import androidx.work.WorkInfo
@@ -54,19 +56,32 @@ class MemoViewModel(
     // Pager を再生成するためのトリガー
     private val _refreshTrigger = MutableStateFlow(0)
     
-    // Paging 3 を使用したメモ一覧
-    val memoListItems: Flow<PagingData<MemoListItem>> = _refreshTrigger
-        .map {
-            Pager(
-                config = PagingConfig(
-                    pageSize = 20,
-                    enablePlaceholders = false,
-                    prefetchDistance = 5
-                )
-            ) {
+    // 検索クエリ
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery
+    
+    // 検索クエリ（デバウンス付き）
+    private val debouncedSearchQuery = _searchQuery
+        .debounce(300) // 300ms待機
+    
+    // Paging 3 を使用したメモ一覧（検索クエリに応じて切り替え）
+    val memoListItems: Flow<PagingData<MemoListItem>> = combine(_refreshTrigger, debouncedSearchQuery) { _, query ->
+        Pager(
+            config = PagingConfig(
+                pageSize = 20,
+                enablePlaceholders = false,
+                prefetchDistance = 5
+            )
+        ) {
+            if (query.isBlank()) {
                 dao.getPagedMemoListItems()
-            }.flow
-        }
+            } else {
+                // 空白区切りでAND検索
+                val searchQuery = net.sasakiy85.handymemo.data.MemoSearchHelper.buildSearchQuery(query)
+                dao.getPagedSearchMemoListItems(searchQuery)
+            }
+        }.flow
+    }
         .flatMapLatest { it }
         .cachedIn(viewModelScope)
 
@@ -178,6 +193,10 @@ class MemoViewModel(
 
     fun triggerManualIndexing() {
         net.sasakiy85.handymemo.work.WorkManagerInitializer.triggerManualIndexing(application)
+    }
+
+    fun onSearchQueryChange(query: String) {
+        _searchQuery.value = query
     }
 
     fun createMemo(content: String) {

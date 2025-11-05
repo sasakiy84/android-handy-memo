@@ -111,12 +111,12 @@ class MainActivity : ComponentActivity() {
                     val navController = rememberNavController()
                     NavHost(navController = navController, startDestination = "memoEdit?template=${URLEncoder.encode(lastUsedTemplate, "UTF-8")}") {
                         composable("memoList") {
-                            val searchQuery by remember { mutableStateOf("") }
+                            val searchQuery by memoViewModel.searchQuery.collectAsState()
                             MemoList(
                                 memoListItems = memoViewModel.memoListItems,
                                 searchQuery = searchQuery,
                                 onSearchQueryChange = { query ->
-                                    // TODO: 検索機能の実装（後で追加）
+                                    memoViewModel.onSearchQueryChange(query)
                                 },
                                 onAddMemo = {
                                     val encodedTemplate = URLEncoder.encode(lastUsedTemplate, "UTF-8")
