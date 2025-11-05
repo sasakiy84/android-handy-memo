@@ -32,10 +32,17 @@ class MemoIndexerWorker(
     private val fileNameFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        // アプリがフォアグラウンドの場合は実行をスキップ
-        if (HandyMemoApplication.isAppInForeground) {
+        // 手動実行の場合はフォアグラウンドチェックをスキップ
+        val isManual = inputData.getBoolean("isManual", false)
+        
+        // アプリがフォアグラウンドの場合は実行をスキップ（ただし手動実行は除く）
+        if (!isManual && HandyMemoApplication.isAppInForeground) {
             Log.d(TAG, "App is in foreground, skipping indexing")
             return@withContext Result.success()
+        }
+        
+        if (isManual) {
+            Log.d(TAG, "Manual indexing started")
         }
 
         try {

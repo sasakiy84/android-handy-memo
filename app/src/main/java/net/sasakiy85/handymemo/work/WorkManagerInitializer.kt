@@ -9,6 +9,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 
 object WorkManagerInitializer {
@@ -50,6 +51,24 @@ object WorkManagerInitializer {
         )
 
         Log.d(TAG, "PeriodicWork enqueued: ${MemoIndexerWorker.WORK_NAME_PERIODIC}")
+    }
+
+    fun triggerManualIndexing(context: Context) {
+        val workManager = WorkManager.getInstance(context)
+
+        // 手動実行用の OneTimeWork を登録（即座に実行）
+        // 手動実行フラグを InputData で渡す
+        val oneTimeWorkRequest = OneTimeWorkRequestBuilder<MemoIndexerWorker>()
+            .setInputData(workDataOf("isManual" to true))
+            .build()
+
+        workManager.enqueueUniqueWork(
+            MemoIndexerWorker.WORK_NAME_ONETIME,
+            ExistingWorkPolicy.REPLACE,
+            oneTimeWorkRequest
+        )
+
+        Log.d(TAG, "Manual indexing triggered")
     }
 }
 

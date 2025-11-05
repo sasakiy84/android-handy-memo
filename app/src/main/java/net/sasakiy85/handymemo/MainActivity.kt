@@ -181,6 +181,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         composable("settings") {
+                            val indexingStatus by memoViewModel.indexingStatus.collectAsState()
                             SettingsScreen(
                                 currentFolderUri = rootUri,
                                 onSelectFolder = {
@@ -189,7 +190,11 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onBack = {
                                     navController.popBackStack()
-                                }
+                                },
+                                onReloadIndex = {
+                                    memoViewModel.triggerManualIndexing()
+                                },
+                                indexingStatus = indexingStatus
                             )
                         }
                     }

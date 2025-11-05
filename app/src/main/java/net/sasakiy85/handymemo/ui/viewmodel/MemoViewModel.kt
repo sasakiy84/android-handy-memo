@@ -7,6 +7,7 @@ import android.net.Uri
 import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.asFlow
 import androidx.lifecycle.viewModelScope
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
@@ -35,7 +36,11 @@ import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import net.sasakiy85.handymemo.data.MediaAttachment
+import net.sasakiy85.handymemo.work.MemoIndexerWorker
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import java.io.File
 
 class MemoViewModel(
@@ -46,16 +51,24 @@ class MemoViewModel(
     private val database = AppDatabase.getDatabase(application)
     private val dao = database.memoCacheDao()
 
+    // Pager を再生成するためのトリガー
+    private val _refreshTrigger = MutableStateFlow(0)
+    
     // Paging 3 を使用したメモ一覧
-    val memoListItems: Flow<PagingData<MemoListItem>> = Pager(
-        config = PagingConfig(
-            pageSize = 20,
-            enablePlaceholders = false,
-            prefetchDistance = 5
-        )
-    ) {
-        dao.getPagedMemoListItems()
-    }.flow.cachedIn(viewModelScope)
+    val memoListItems: Flow<PagingData<MemoListItem>> = _refreshTrigger
+        .map {
+            Pager(
+                config = PagingConfig(
+                    pageSize = 20,
+                    enablePlaceholders = false,
+                    prefetchDistance = 5
+                )
+            ) {
+                dao.getPagedMemoListItems()
+            }.flow
+        }
+        .flatMapLatest { it }
+        .cachedIn(viewModelScope)
 
     val rootUri: StateFlow<Uri?> = settingsRepository.rootUriFlow
         .map { uriString -> uriString?.toUri() }
@@ -72,6 +85,34 @@ class MemoViewModel(
 
     private val _insertTextEvent = MutableSharedFlow<String>()
     val insertTextEvent = _insertTextEvent.asSharedFlow()
+
+    // WorkManager の実行状態を監視
+    private val workManager = WorkManager.getInstance(application)
+    
+    enum class IndexingStatus {
+        IDLE,           // 実行していない
+        RUNNING,        // 実行中
+        SUCCEEDED,      // 成功
+        FAILED          // 失敗
+    }
+
+    val indexingStatus: StateFlow<IndexingStatus> = workManager
+        .getWorkInfosForUniqueWorkLiveData(MemoIndexerWorker.WORK_NAME_ONETIME)
+        .asFlow()
+        .map { workInfos ->
+            val workInfo = workInfos.firstOrNull()
+            when (workInfo?.state) {
+                WorkInfo.State.RUNNING -> IndexingStatus.RUNNING
+                WorkInfo.State.SUCCEEDED -> {
+                    // 成功時にPagerを再生成してデータを更新
+                    _refreshTrigger.value++
+                    IndexingStatus.SUCCEEDED
+                }
+                WorkInfo.State.FAILED -> IndexingStatus.FAILED
+                else -> IndexingStatus.IDLE
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), IndexingStatus.IDLE)
 
     private val fileNameFormatter = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
 
@@ -133,6 +174,10 @@ class MemoViewModel(
         viewModelScope.launch {
             settingsRepository.saveRootUri(uri.toString())
         }
+    }
+
+    fun triggerManualIndexing() {
+        net.sasakiy85.handymemo.work.WorkManagerInitializer.triggerManualIndexing(application)
     }
 
     fun createMemo(content: String) {
