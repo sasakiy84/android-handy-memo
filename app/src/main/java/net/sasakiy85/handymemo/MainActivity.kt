@@ -240,9 +240,63 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action == "CREATE_MEMO_FROM_WIDGET") {
-            val templateText = intent.getStringExtra("EXTRA_TEMPLATE_TEXT")
-            memoViewModel.onWidgetTapped(templateText)
+        Log.d("ShareIntent", "handleIntent called with action: ${intent?.action}")
+        when (intent?.action) {
+            "CREATE_MEMO_FROM_WIDGET" -> {
+                val templateText = intent.getStringExtra("EXTRA_TEMPLATE_TEXT")
+                Log.d("ShareIntent", "Widget template: $templateText")
+                memoViewModel.onWidgetTapped(templateText)
+            }
+            Intent.ACTION_SEND -> {
+                Log.d("ShareIntent", "Intent type: ${intent.type}")
+                if (intent.type == "text/plain") {
+                    val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    val sharedSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT)
+                    // EXTRA_TITLEは標準の定数がないため、文字列で取得（Pocket Castなどが使用）
+                    val sharedTitle = intent.getStringExtra("android.intent.extra.TITLE")
+                    
+                    Log.d("ShareIntent", "EXTRA_TEXT: $sharedText")
+                    Log.d("ShareIntent", "EXTRA_SUBJECT: $sharedSubject")
+                    Log.d("ShareIntent", "EXTRA_TITLE: $sharedTitle")
+                    
+                    // すべてのIntentのextraを確認
+                    intent.extras?.keySet()?.forEach { key ->
+                        val value = intent.extras?.get(key)
+                        Log.d("ShareIntent", "Intent extra - $key: $value")
+                    }
+                    
+                    // タイトルとURLを組み合わせてテキストを作成
+                    val combinedText = buildString {
+                        // タイトルの優先順位: EXTRA_SUBJECT > EXTRA_TITLE
+                        val title = when {
+                            !sharedSubject.isNullOrBlank() -> {
+                                Log.d("ShareIntent", "Using EXTRA_SUBJECT as title: $sharedSubject")
+                                sharedSubject
+                            }
+                            !sharedTitle.isNullOrBlank() -> {
+                                Log.d("ShareIntent", "Using EXTRA_TITLE as title: $sharedTitle")
+                                sharedTitle
+                            }
+                            else -> null
+                        }
+                        
+                        if (!title.isNullOrBlank()) {
+                            append(title)
+                            if (!sharedText.isNullOrBlank()) {
+                                append("\n")
+                            }
+                        }
+                        if (!sharedText.isNullOrBlank()) {
+                            append(sharedText)
+                        }
+                    }
+                    
+                    Log.d("ShareIntent", "Final combined text: $combinedText")
+                    if (combinedText.isNotBlank()) {
+                        memoViewModel.onWidgetTapped(combinedText)
+                    }
+                }
+            }
         }
     }
 }
